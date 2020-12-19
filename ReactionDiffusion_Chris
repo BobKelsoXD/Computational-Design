@@ -1,0 +1,143 @@
+import rhinoscriptsyntax as rs
+import math
+import random
+import clr 
+clr.AddReference("Grasshopper")
+from Grasshopper.Kernel.Data import *
+from Grasshopper import DataTree
+
+#Create a matrix
+
+def InitMatrix(randomSeed):
+    global A0
+    global B0
+    
+    tempValues = []
+    random.seed(randomSeed)
+    for i in range(iHeight):
+        thisA = []
+        thisB = []
+        for j in range(iWidth):
+            thisA.append(random.random() * 12 + random.random() * 2)
+            thisB.append(random.random() * 12 + random.random() * 2)
+        tempValues.append(thisA)
+        A0.append(thisA)
+        B0.append(thisB)
+
+#Copy a Matrix
+
+def CopyMatrix(src):
+    res = []
+    for i in range(len(src)):
+        list = []
+        for j in range (len(src[0])):
+            list.append(src[i][j])
+        res.append(list)
+    return res
+
+#Matrix of 0s
+
+def NullMatrix():
+    res = []
+    for i in range(iHeight):
+        list = []
+        for j in range(iWidth):
+            list.append(0)
+        res.append(list)
+    return res
+
+#Solver
+
+def Solve(CA, CB, iterations):
+    An = NullMatrix()
+    Bn = NullMatrix()
+    global A0
+    global B0
+    
+    for n in range(iterations):
+        for i in range(iHeight):
+            iplus1 = i + 1
+            iminus1 = i - 1
+            if (i == 0):
+                iminus1 = iHeight - 1
+            if (i == iHeight - 1):
+                iplus1 = 0
+            for j in range(iWidth):
+                jplus1 = j + 1
+                jminus1 = j - 1
+                if (j == 0):
+                    jminus1 = iWidth - 1
+                if (j == iWidth - 1):
+                    jplus1 = 0
+                
+                #calculate component A
+                DiA = CA * (A0[iplus1][j] - 2.0 * A0[iminus1][j] + A0[i][jplus1] - 2.0 * A0[i][j] + A0[i][jminus1])
+                ReA = A0[i][j] * B0[i][j] - A0[i][j] - 12.0
+                An[i][j] = A0[i][j] + 0.01 * (ReA + DiA)
+                
+                if (An[i][j] < 0.0):
+                    An[i][j] = 0.0
+                
+                #calculate component B
+                DiB = CB * (B0[iplus1][j] - 2.0 * B0[iminus1][j] + B0[i][jplus1] - 2.0 * B0[i][j] + B0[i][jminus1])
+                ReB = 16.0 - A0[i][j] * B0[i][j]
+                Bn[i][j] = B0[i][j] + 0.01 * (ReB + DiB)
+                
+                if (Bn[i][j] < 0.0):
+                    Bn[i][j] = 0.0
+        A0 = CopyMatrix(An)
+        B0 = CopyMatrix(Bn)
+    a = A0
+    b = B0
+
+#Main Code
+
+curves = []
+
+def CreateCurves(surface, which, Z, uDiv, vDiv):
+    mat = []
+    if which == 'A' : mat = A0
+    if which == 'B' : mat = B0
+    
+    #Empty List
+    arrayPt = []
+    arrayN = []
+    
+    if (surface == None):
+        return
+    if (uDiv == None or vDiv == None):
+        return
+    #Redeem List
+    for i in range (0, uDiv, 1):
+        arrayPt.append([0] * vDiv)
+        arrayN.append([0] * vDiv)
+
+    uDomain = rs.SurfaceDomain(iSurface, 0)
+    vDomain = rs.SurfaceDomain(iSurface, 1)
+
+    #get coordinates from the domain and add a point
+    rs.EnableRedraw(False)
+    for i in range(0, uDiv, 1):
+        for j in range(0, vDiv, 1):
+            parameterU = uDomain[0] + i * (uDomain[1] - uDomain[0])/ uDiv
+            parameterV = vDomain[0] + j * (vDomain[1] - vDomain[0])/ vDiv
+            arrayPt[i][j] = rs.EvaluateSurface(iSurface, parameterU, parameterV)
+            arrayN[i][j] = rs.SurfaceNormal(iSurface, (parameterU, parameterV))
+
+    for i in range(iHeight):
+        curve = []
+        for j in range(iWidth):
+            vectorNormal = rs.VectorScale(arrayN[i][j], (mat[i][j]/Z) * 0.1)
+            vectorNormal = rs.VectorAdd(vectorNormal, arrayPt[i][j])
+            curve.append(vectorNormal)
+        curves.append(rs.coercecurve(rs.AddCurve(curve)))
+
+    return curves
+
+seed = 1
+A0 = []
+B0 = []
+calc = iStep
+InitMatrix(seed)
+Solve(iConA, iConB, calc)
+oGeometry = CreateCurves(iSurface, iConc, iZfactor, iWidth, iHeight)
